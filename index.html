@@ -7,10 +7,11 @@
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; font-family: Arial, "PingFang SC", sans-serif; background: #e8f2f3; color: #183035; }
-    header { padding: 18px 24px; background: #fff; border-bottom: 1px solid #c9dadc; display: flex; justify-content: space-between; gap: 16px; align-items: center; }
+    header { padding: 18px 24px; background: #fff; border-bottom: 1px solid #c9dadc; display: flex; justify-content: space-between; gap: 16px; align-items: center; flex-wrap: wrap; }
     h1 { margin: 0; font-size: 26px; }
     button { border: 0; border-radius: 8px; padding: 10px 13px; background: #1d6c78; color: #fff; font-weight: 800; cursor: pointer; }
     button.secondary { background: #64777b; }
+    button.small { padding: 6px 10px; font-size: 12px; }
     input, select, textarea { width: 100%; border: 1px solid #c9dadc; border-radius: 6px; padding: 9px; font: inherit; background: #fff; }
     textarea { min-height: 64px; }
     label { display: block; margin: 9px 0 5px; color: #5c7378; font-size: 13px; }
@@ -21,133 +22,717 @@
     .rib { position: absolute; width: 2px; height: 36%; background: rgba(220,235,224,.35); top: 27%; transform: rotate(-9deg); }
     .marker { position: absolute; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 12px; font-weight: 800; transform: translate(-50%, -50%); border: 2px solid rgba(255,255,255,.7); box-shadow: 0 4px 12px rgba(0,0,0,.35); cursor: pointer; }
     .marker.selected { outline: 4px solid rgba(255,234,124,.75); }
+    .marker.conflict { outline: 4px solid #e05a47; }
     .ceramic { background: #b56c38; } .wood { background: #6c4b2f; } .metal { background: #6e7880; } .unknown { background: #725ca6; }
     .toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
     .list { display: grid; gap: 8px; max-height: 330px; overflow: auto; }
     .item { border: 1px solid #d7e4e5; border-radius: 8px; padding: 10px; cursor: pointer; }
     .item.active { border-color: #1d6c78; background: #eef8f9; }
+    .item.deleted { opacity: .55; }
     .timeline { display: grid; gap: 8px; max-height: 240px; overflow: auto; }
     .pill { display: inline-block; padding: 3px 8px; border: 1px solid #c9dadc; border-radius: 999px; font-size: 12px; }
+    .pill.conflict { background: #fdecec; border-color: #e0a4a4; color: #92352a; }
+    .pill.removed { background: #eee; color: #777; }
     .muted { color: #5c7378; font-size: 13px; }
+    .banner { border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .banner.warn { background: #fdf3d7; border: 1px solid #e6cf7a; }
+    .banner.conflict { background: #fdecec; border: 1px solid #e0a4a4; }
+    .badge { display: inline-block; background: #c0392b; color: #fff; border-radius: 999px; padding: 0 7px; font-size: 11px; margin-left: 4px; }
+    .modal { position: fixed; inset: 0; background: rgba(10,30,35,.45); display: grid; place-items: center; z-index: 50; }
+    .modal[hidden] { display: none; }
+    .modal-box { background: #fff; border-radius: 10px; padding: 18px; max-width: 600px; width: 92%; max-height: 82vh; overflow: auto; }
+    .modal-actions { margin-top: 14px; display: flex; justify-content: flex-end; }
+    .conflict-item { border: 1px solid #d7e4e5; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
+    .conflict-item .toolbar { margin: 8px 0 0; }
+    ul.report { margin: 6px 0; padding-left: 22px; }
     @media (max-width: 980px) { header { display: block; } .app { grid-template-columns: 1fr; } .map { height: 560px; } }
   </style>
 </head>
 <body>
   <header>
-    <div><h1>水下考古潜水记录</h1><div class="muted">点击沉船平面图添加标记，筛选、编辑并导出JSON。</div></div>
-    <button id="exportBtn">导出JSON</button>
+    <div>
+      <h1>水下考古潜水记录</h1>
+      <div class="muted">点击沉船平面图添加标记，离线记录、回墩合并并导出JSON。
+        <span id="deviceLine"></span>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button id="conflictBtn" class="secondary">冲突处理<span id="conflictBadge" class="badge" hidden>0</span></button>
+      <button id="importBtn" class="secondary">导入JSON</button>
+      <button id="exportBtn">导出JSON</button>
+      <input type="file" id="fileInput" accept="application/json,.json" hidden>
+    </div>
   </header>
   <main class="app">
     <section class="panel">
       <div class="map" id="map"><div class="wreck"></div></div>
     </section>
     <aside class="panel">
+      <div id="recoveryBanner" class="banner warn" hidden></div>
+      <div id="conflictBanner" class="banner conflict" hidden></div>
       <div class="toolbar">
         <select id="filter"><option value="">全部类型</option><option value="ceramic">陶片</option><option value="wood">木构件</option><option value="metal">金属件</option><option value="unknown">未知物</option></select>
         <select id="view"><option value="list">标记列表</option><option value="timeline">潜次时间线</option></select>
       </div>
+      <label class="muted" style="display:flex;align-items:center;gap:6px;margin:0 0 10px;"><input type="checkbox" id="showDeleted" style="width:auto;"> 显示已撤掉的标记</label>
       <form id="form">
         <h2>标记信息</h2>
         <input name="id" type="hidden">
         <label>编号</label><input name="code" required>
         <label>类型</label><select name="type"><option value="ceramic">陶片</option><option value="wood">木构件</option><option value="metal">金属件</option><option value="unknown">未知物</option></select>
-        <label>潜次</label><input name="dive" placeholder="例如DIVE-04" required>
+        <label>潜次</label><input name="dive" list="diveList" placeholder="例如DIVE-04" required>
+        <datalist id="diveList"></datalist>
         <label>深度</label><input name="depth" placeholder="例如18.4m" required>
         <label>朝向</label><input name="orientation" placeholder="例如东北偏北">
         <label>保存状态</label><input name="condition" placeholder="例如表面附着贝类">
         <label>备注</label><textarea name="note"></textarea>
-        <div class="toolbar"><button>保存标记</button><button type="button" id="deleteBtn" class="secondary">删除</button></div>
+        <div class="toolbar"><button>保存标记</button><button type="button" id="deleteBtn" class="secondary">撤掉标记</button></div>
       </form>
       <h2 id="listTitle">标记列表</h2>
       <div id="list" class="list"></div>
     </aside>
   </main>
+  <div id="modal" class="modal" hidden>
+    <div class="modal-box">
+      <div id="modalBody"></div>
+      <div class="modal-actions"><button id="modalClose" class="secondary">关闭</button></div>
+    </div>
+  </div>
   <script>
-    const map = document.querySelector("#map");
-    const form = document.querySelector("#form");
-    const list = document.querySelector("#list");
-    const filter = document.querySelector("#filter");
-    const view = document.querySelector("#view");
-    const listTitle = document.querySelector("#listTitle");
+    "use strict";
+    const SCHEMA_VERSION = 2;
+    const KEYS = {
+      device: "zfl30Device", dives: "zfl30Dives", marks: "zfl30Marks",
+      ops: "zfl30Ops", batches: "zfl30Batches", conflicts: "zfl30Conflicts",
+      schema: "zfl30Schema"
+    };
     const typeNames = { ceramic: "陶片", wood: "木构件", metal: "金属件", unknown: "未知物" };
-    let marks = JSON.parse(localStorage.getItem("zfl30Marks") || "[]");
+    const fieldNames = {
+      code: "编号", type: "类型", diveId: "潜次", depth: "深度", orientation: "朝向",
+      condition: "保存状态", note: "备注", x: "横坐标", y: "纵坐标", dcode: "潜次编号", dnote: "潜次备注"
+    };
+    const $ = s => document.querySelector(s);
+    const map = $("#map");
+    const form = $("#form");
+    const list = $("#list");
+    const filter = $("#filter");
+    const view = $("#view");
+    const listTitle = $("#listTitle");
+    const load = (k, fb) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? fb : v; } catch { return fb; } };
+    const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+    const uuid = () => crypto.randomUUID();
+    const now = () => Date.now();
+
+    let device, dives, marks, ops, batches, conflicts;
     let pending = null;
-    if (!marks.length) {
-      marks = [
-        { id: crypto.randomUUID(), code: "A-017", type: "ceramic", dive: "DIVE-01", x: 42, y: 46, depth: "17.8m", orientation: "东", condition: "边缘残缺", note: "靠近船肋" },
-        { id: crypto.randomUUID(), code: "W-003", type: "wood", dive: "DIVE-02", x: 58, y: 39, depth: "18.2m", orientation: "西北", condition: "稳定", note: "疑似横梁" }
-      ];
-      save();
+
+    function persistDevice() { save(KEYS.device, device); }
+    function saveDives() { save(KEYS.dives, dives); }
+    function saveMarks() { save(KEYS.marks, marks); }
+    function saveOps() { save(KEYS.ops, ops); }
+    function saveBatches() { save(KEYS.batches, batches); }
+    function saveConflicts() { save(KEYS.conflicts, conflicts); }
+    function saveAll() { saveDives(); saveMarks(); saveOps(); saveBatches(); saveConflicts(); }
+
+    function initDevice() {
+      device = load(KEYS.device, null);
+      if (!device) {
+        device = { id: "dev-" + uuid().slice(0, 8), name: "本机-" + String(Math.floor(Math.random() * 900) + 100), seq: 0 };
+        persistDevice();
+      }
     }
-    for (let i = 0; i < 7; i++) {
-      const rib = document.createElement("div");
-      rib.className = "rib";
-      rib.style.left = 28 + i * 7 + "%";
-      map.appendChild(rib);
+    function nextOpId() { device.seq += 1; persistDevice(); return device.id + "#" + device.seq; }
+
+    function diveCodeOf(diveId) {
+      const d = dives.find(x => x.id === diveId);
+      return d ? d.code : "?";
     }
-    function save() { localStorage.setItem("zfl30Marks", JSON.stringify(marks)); }
+    function deviceNameOf(id) {
+      if (!id) return "未知";
+      if (id === device.id) return device.name + "（本机）";
+      const b = batches.find(x => x.sourceDevice === id && x.sourceName);
+      return b ? b.sourceName : id;
+    }
+
+    // ---------- 旧数据升级：补出来源 ----------
+    function migrateIfNeeded() {
+      const v = Number(localStorage.getItem(KEYS.schema) || "1");
+      if (v >= SCHEMA_VERSION) return;
+      initDevice();
+      batches = load(KEYS.batches, []);
+      ops = load(KEYS.ops, []);
+      conflicts = load(KEYS.conflicts, []);
+      const oldMarks = load(KEYS.marks, []);
+      const batch = {
+        batchId: uuid(), type: "migration", source: "legacy", fileName: null,
+        startedAt: now(), finishedAt: null, status: "applying",
+        opsTotal: 0, opsApplied: 0, skipped: [], dropped: [], conflicts: [], appliedOpIds: []
+      };
+      dives = []; marks = [];
+      const diveByCode = new Map();
+      const ensureDive = code => {
+        code = (code || "DIVE-01").trim();
+        if (diveByCode.has(code)) return diveByCode.get(code);
+        const existed = dives.find(d => d.code === code);
+        if (existed) { diveByCode.set(code, existed.id); return existed.id; }
+        const id = uuid();
+        const ts = now();
+        const dive = { id, code, note: "", deviceId: device.id, version: 1, createdAt: ts, updatedAt: ts, deleted: false };
+        dives.push(dive);
+        diveByCode.set(code, id);
+        ops.push({ opId: "migrate:dive:" + id, deviceId: device.id, baseVersion: 0, entityType: "dive", entityId: id, op: "create", payload: { ...dive }, ts });
+        return id;
+      };
+      for (const m of oldMarks) {
+        const id = m.id || uuid();
+        const ts = now();
+        const mark = {
+          id, code: m.code || "M-???", type: m.type || "unknown", diveId: ensureDive(m.dive),
+          x: Number(m.x) || 0, y: Number(m.y) || 0, depth: m.depth || "", orientation: m.orientation || "",
+          condition: m.condition || "", note: m.note || "",
+          deviceId: device.id, version: 1, createdAt: ts, updatedAt: ts, deleted: false
+        };
+        marks.push(mark);
+        ops.push({ opId: "migrate:marker:" + id, deviceId: device.id, baseVersion: 0, entityType: "marker", entityId: id, op: "create", payload: { ...mark }, ts });
+      }
+      batch.opsTotal = ops.length;
+      batch.opsApplied = ops.length;
+      batch.appliedOpIds = ops.map(o => o.opId);
+      batch.status = "done";
+      batch.finishedAt = now();
+      batches.push(batch);
+      saveAll();
+      localStorage.setItem(KEYS.schema, String(SCHEMA_VERSION));
+    }
+
+    function seedIfEmpty() {
+      if (ops.length || marks.length || dives.length) return;
+      createDive("DIVE-01");
+      createDive("DIVE-02");
+      createMark({ code: "A-017", type: "ceramic", dive: "DIVE-01", x: 42, y: 46, depth: "17.8m", orientation: "东", condition: "边缘残缺", note: "靠近船肋" });
+      createMark({ code: "W-003", type: "wood", dive: "DIVE-02", x: 58, y: 39, depth: "18.2m", orientation: "西北", condition: "稳定", note: "疑似横梁" });
+    }
+
+    // ---------- 本地改动：全部带设备号、基准版本、操作号 ----------
+    function createDive(code) {
+      code = (code || "").trim();
+      if (!code) return null;
+      const existed = dives.find(d => d.code === code && !d.deleted);
+      if (existed) return existed;
+      const ts = now();
+      const dive = { id: uuid(), code, note: "", deviceId: device.id, version: 1, createdAt: ts, updatedAt: ts, deleted: false };
+      dives.push(dive);
+      ops.push({ opId: nextOpId(), deviceId: device.id, baseVersion: 0, entityType: "dive", entityId: dive.id, op: "create", payload: { ...dive }, ts });
+      saveDives(); saveOps();
+      return dive;
+    }
+
+    function createMark(data) {
+      let dive = dives.find(d => d.code === (data.dive || "").trim() && !d.deleted);
+      if (!dive) dive = createDive((data.dive || "DIVE-01").trim());
+      const ts = now();
+      const mark = {
+        id: uuid(), code: data.code || "M-???", type: data.type || "unknown", diveId: dive.id,
+        x: Number(data.x) || 50, y: Number(data.y) || 50,
+        depth: data.depth || "", orientation: data.orientation || "", condition: data.condition || "", note: data.note || "",
+        deviceId: device.id, version: 1, createdAt: ts, updatedAt: ts, deleted: false
+      };
+      marks.push(mark);
+      ops.push({ opId: nextOpId(), deviceId: device.id, baseVersion: 0, entityType: "marker", entityId: mark.id, op: "create", payload: { ...mark }, ts });
+      saveMarks(); saveOps();
+      return mark;
+    }
+
+    function updateMark(id, data) {
+      const mark = marks.find(m => m.id === id);
+      if (!mark || mark.deleted) return false;
+      let dive = dives.find(d => d.code === (data.dive || "").trim() && !d.deleted);
+      if (!dive) dive = createDive((data.dive || "DIVE-01").trim());
+      const fields = {
+        code: data.code, type: data.type, diveId: dive.id, depth: data.depth,
+        orientation: data.orientation, condition: data.condition, note: data.note,
+        x: Number(data.x), y: Number(data.y)
+      };
+      const changes = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && Number.isNaN(v) === false && mark[k] !== v) changes[k] = { from: mark[k], to: v };
+      }
+      if (!Object.keys(changes).length) return true;
+      const base = mark.version;
+      Object.assign(mark, fields, { updatedAt: now(), deviceId: device.id, version: mark.version + 1 });
+      ops.push({ opId: nextOpId(), deviceId: device.id, baseVersion: base, entityType: "marker", entityId: mark.id, op: "update", changes, ts: mark.updatedAt });
+      saveMarks(); saveOps();
+      return true;
+    }
+
+    function deleteMark(id) {
+      const mark = marks.find(m => m.id === id);
+      if (!mark || mark.deleted) return;
+      const base = mark.version;
+      mark.deleted = true;
+      mark.updatedAt = now();
+      mark.version += 1;
+      ops.push({ opId: nextOpId(), deviceId: device.id, baseVersion: base, entityType: "marker", entityId: id, op: "delete", ts: mark.updatedAt });
+      conflicts = conflicts.filter(c => !(c.entityType === "marker" && c.entityId === id && c.status === "pending"));
+      saveMarks(); saveOps(); saveConflicts();
+    }
+
+    // ---------- 远端操作合并 ----------
+    function noteSkipped(batch, op, reason) {
+      if (!batch.skipped.some(s => s.opId === op.opId)) {
+        batch.skipped.push({ opId: op.opId, entityType: op.entityType, entityId: op.entityId, reason });
+      }
+    }
+    function noteConflict(batch, op, field) {
+      if (!batch.conflicts.some(c => c.opId === op.opId && c.field === field)) {
+        batch.conflicts.push({ opId: op.opId, entityType: op.entityType, entityId: op.entityId, field });
+      }
+    }
+
+    // 幂等：同一操作号只认首次结果；撤掉优先于迟到编辑；同字段两边改则挂起并保留两份现场值
+    function applyRemoteOp(op, batch) {
+      if (ops.some(o => o.opId === op.opId)) { noteSkipped(batch, op, "duplicate"); return; }
+      const table = op.entityType === "dive" ? dives : marks;
+      const existing = table.find(e => e.id === op.entityId);
+      if (op.op === "create") {
+        if (existing) { noteSkipped(batch, op, existing.deleted ? "already-deleted" : "entity-exists"); return; }
+        table.push({ ...op.payload, deviceId: op.deviceId, version: 1, createdAt: op.ts || now(), updatedAt: op.ts || now(), deleted: false });
+        ops.push(op);
+        return;
+      }
+      if (op.op === "delete") {
+        if (!existing) { noteSkipped(batch, op, "missing-entity"); return; }
+        if (existing.deleted) { noteSkipped(batch, op, "already-deleted"); ops.push(op); return; }
+        if (existing.version > op.baseVersion) {
+          batch.dropped.push({ opId: op.opId, entityType: op.entityType, entityId: existing.id, reason: "concurrent-edit-suppressed-by-delete" });
+        }
+        existing.deleted = true;
+        existing.updatedAt = op.ts || now();
+        existing.version += 1;
+        ops.push(op);
+        return;
+      }
+      if (op.op === "update") {
+        if (!existing) { noteSkipped(batch, op, "missing-entity"); return; }
+        if (existing.deleted) { noteSkipped(batch, op, "deleted-entity-late-edit"); return; } // 已撤掉的标记不能复活
+        let hadConflict = false;
+        for (const [field, ch] of Object.entries(op.changes || {})) {
+          if (existing[field] === ch.to) continue;                 // 已是对方的值
+          if (existing[field] === ch.from) { existing[field] = ch.to; } // 基于同一基准，直接采用
+          else {                                                   // 两边都改了同一字段：挂起，保留两份现场值
+            hadConflict = true;
+            if (!conflicts.some(c => c.entityType === op.entityType && c.entityId === existing.id && c.field === field && c.status === "pending")) {
+              conflicts.push({
+                id: uuid(), entityType: op.entityType, entityId: existing.id, field,
+                localValue: existing[field], remoteValue: ch.to, remoteDeviceId: op.deviceId,
+                opId: op.opId, batchId: batch.batchId, status: "pending", createdAt: now()
+              });
+            }
+            noteConflict(batch, op, field);
+          }
+        }
+        existing.version += 1;
+        existing.updatedAt = op.ts || now();
+        if (!hadConflict) existing.deviceId = op.deviceId;
+        existing.hasConflict = conflicts.some(c => c.entityType === op.entityType && c.entityId === existing.id && c.status === "pending");
+        ops.push(op);
+      }
+    }
+
+    // ---------- 导入批次：可崩溃恢复 ----------
+    function runBatch(batch, opList) {
+      batch.ops = opList;
+      batch.opsApplied = 0;
+      batch.appliedOpIds = [];
+      batch.skipped = [];
+      batch.dropped = [];
+      batch.conflicts = [];
+      batch.status = "applying";
+      batch.error = null;
+      saveBatches();
+      try {
+        for (const op of opList) {
+          applyRemoteOp(op, batch);
+          batch.opsApplied += 1;
+          batch.appliedOpIds.push(op.opId);
+          saveBatches(); // 每条操作落盘一次，崩溃后可从断点继续
+        }
+        batch.status = "done";
+        batch.finishedAt = now();
+      } catch (e) {
+        batch.status = "error";
+        batch.error = String((e && e.message) || e);
+      }
+      saveAll();
+      render();
+      showBatchReport(batch);
+    }
+
+    function legacyOpsFromMarks(list) {
+      const result = [];
+      const diveIds = new Map();
+      list.forEach((m, i) => {
+        const code = (m.dive || "DIVE-01").trim();
+        if (!diveIds.has(code)) {
+          const id = "legacy:dive:" + code;
+          diveIds.set(code, id);
+          const ts = now();
+          result.push({
+            opId: id, deviceId: "legacy", baseVersion: 0, entityType: "dive", entityId: id, op: "create",
+            payload: { id, code, note: "", deviceId: "legacy", version: 1, createdAt: ts, updatedAt: ts, deleted: false }, ts
+          });
+        }
+        const id = "legacy:marker:" + (m.id || i);
+        const ts = now();
+        result.push({
+          opId: id, deviceId: "legacy", baseVersion: 0, entityType: "marker", entityId: id, op: "create",
+          payload: {
+            id, code: m.code || "M-???", type: m.type || "unknown", diveId: diveIds.get(code),
+            x: Number(m.x) || 0, y: Number(m.y) || 0, depth: m.depth || "", orientation: m.orientation || "",
+            condition: m.condition || "", note: m.note || "",
+            deviceId: "legacy", version: 1, createdAt: ts, updatedAt: ts, deleted: false
+          }, ts
+        });
+      });
+      return result;
+    }
+
+    function normalizePackage(data) {
+      if (Array.isArray(data)) return { deviceId: "legacy", deviceName: "旧版导出", ops: legacyOpsFromMarks(data) };
+      if (data && typeof data === "object") {
+        if (data.format === "zfl30-archive" || Array.isArray(data.ops)) {
+          return { deviceId: data.deviceId || "unknown", deviceName: data.deviceName || "", ops: data.ops || [] };
+        }
+        if (Array.isArray(data.marks)) {
+          return { deviceId: data.deviceId || "legacy", deviceName: data.deviceName || "旧版导出", ops: legacyOpsFromMarks(data.marks) };
+        }
+      }
+      return null;
+    }
+
+    function handleImportFile(file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        let data;
+        try { data = JSON.parse(String(reader.result)); }
+        catch { alert("文件不是有效的JSON，无法导入。"); return; }
+        const pkg = normalizePackage(data);
+        if (!pkg) { alert("无法识别的导出文件格式。"); return; }
+        const batch = {
+          batchId: uuid(), type: "import", sourceDevice: pkg.deviceId, sourceName: pkg.deviceName,
+          fileName: file.name, startedAt: now(), finishedAt: null, status: "applying",
+          opsTotal: pkg.ops.length, opsApplied: 0, skipped: [], dropped: [], conflicts: [], appliedOpIds: []
+        };
+        batches.push(batch);
+        saveBatches();
+        runBatch(batch, pkg.ops);
+      };
+      reader.readAsText(file);
+    }
+
+    function checkRecovery() {
+      const unfinished = batches.filter(b => b.status === "applying" || b.status === "pending" || b.status === "error");
+      const banner = $("#recoveryBanner");
+      if (!unfinished.length) { banner.hidden = true; return; }
+      const b = unfinished[0];
+      banner.innerHTML = "";
+      const msg = document.createElement("span");
+      msg.innerHTML = "检测到未完成的导入批次：<b>" + (b.fileName || "数据迁移") + "</b>" +
+        "（来源 " + (b.sourceName || b.sourceDevice) + "），进度 " + b.opsApplied + "/" + b.opsTotal +
+        (b.status === "error" ? "，上次出错：" + b.error : "") + "。";
+      const resume = document.createElement("button");
+      resume.className = "small";
+      resume.textContent = "继续导入";
+      resume.onclick = () => runBatch(b, b.ops || []);
+      const discard = document.createElement("button");
+      discard.className = "small secondary";
+      discard.textContent = "放弃批次";
+      discard.onclick = () => { b.status = "discarded"; saveBatches(); checkRecovery(); };
+      banner.append(msg, resume, discard);
+      banner.hidden = false;
+    }
+
+    // ---------- 冲突裁决 ----------
+    function pendingConflicts() { return conflicts.filter(c => c.status === "pending"); }
+
+    function renderConflictBanner() {
+      const n = pendingConflicts().length;
+      const banner = $("#conflictBanner");
+      const badge = $("#conflictBadge");
+      badge.hidden = n === 0;
+      badge.textContent = n;
+      if (!n) { banner.hidden = true; return; }
+      banner.hidden = false;
+      banner.innerHTML = "";
+      const msg = document.createElement("span");
+      msg.innerHTML = "有 <b>" + n + "</b> 处字段冲突挂起：两边离线时改了同一字段，已保留两份现场值，裁决前双方数据都不丢失。";
+      const btn = document.createElement("button");
+      btn.className = "small";
+      btn.textContent = "去处理";
+      btn.onclick = openConflictModal;
+      banner.append(msg, btn);
+    }
+
+    function entityLabel(c) {
+      if (c.entityType === "dive") {
+        const d = dives.find(x => x.id === c.entityId);
+        return "潜次 " + (d ? d.code : "?");
+      }
+      const m = marks.find(x => x.id === c.entityId);
+      return "标记 " + (m ? m.code : "?");
+    }
+
+    function openConflictModal() {
+      const list = pendingConflicts();
+      const body = $("#modalBody");
+      body.innerHTML = "<h2>字段冲突（挂起）</h2>";
+      if (!list.length) {
+        body.innerHTML += '<p class="muted">没有挂起的冲突。</p>';
+      } else {
+        list.forEach((c, i) => {
+          const wrap = document.createElement("div");
+          wrap.className = "conflict-item";
+          wrap.innerHTML = "<b>" + entityLabel(c) + "</b> · " + (fieldNames[c.field] || c.field) +
+            '<div class="muted">本机值：' + (c.localValue === "" ? "（空）" : c.localValue) + "</div>" +
+            '<div class="muted">对方值：' + (c.remoteValue === "" ? "（空）" : c.remoteValue) + "（来源 " + deviceNameOf(c.remoteDeviceId) + "）</div>";
+          const bar = document.createElement("div");
+          bar.className = "toolbar";
+          const localBtn = document.createElement("button");
+          localBtn.textContent = "用本机值";
+          localBtn.onclick = () => resolveConflict(list[i], "local");
+          const remoteBtn = document.createElement("button");
+          remoteBtn.className = "secondary";
+          remoteBtn.textContent = "用对方值";
+          remoteBtn.onclick = () => resolveConflict(list[i], "remote");
+          bar.append(localBtn, remoteBtn);
+          wrap.append(bar);
+          body.append(wrap);
+        });
+      }
+      openModal();
+    }
+
+    function resolveConflict(c, choice) {
+      const table = c.entityType === "dive" ? dives : marks;
+      const e = table.find(x => x.id === c.entityId);
+      if (e && choice === "remote") {
+        const base = e.version;
+        e[c.field] = c.remoteValue;
+        e.deviceId = c.remoteDeviceId;
+        e.updatedAt = now();
+        e.version += 1;
+        ops.push({
+          opId: nextOpId(), deviceId: device.id, baseVersion: base, entityType: c.entityType,
+          entityId: c.entityId, op: "update",
+          changes: { [c.field]: { from: c.localValue, to: c.remoteValue } }, ts: e.updatedAt, note: "conflict-resolution"
+        });
+      }
+      c.status = "resolved";
+      c.resolution = choice;
+      c.resolvedAt = now();
+      if (e) e.hasConflict = conflicts.some(x => x.entityType === c.entityType && x.entityId === c.entityId && x.status === "pending");
+      saveAll();
+      render();
+      openConflictModal();
+    }
+
+    // ---------- 批次报告 ----------
+    function reasonText(r) {
+      return {
+        duplicate: "操作号重复（重传只认首次结果）",
+        "already-deleted": "实体已撤掉",
+        "deleted-entity-late-edit": "实体已撤掉，迟到编辑未复活",
+        "missing-entity": "本机缺少该实体",
+        "entity-exists": "实体已存在",
+        "concurrent-edit-suppressed-by-delete": "删除压制了并发的本地修改"
+      }[r] || r;
+    }
+    function opLabel(s) {
+      const t = s.entityType === "dive" ? "潜次" : "标记";
+      const e = (s.entityType === "dive" ? dives : marks).find(x => x.id === s.entityId);
+      return t + " " + (e ? e.code : s.entityId.slice(0, 8));
+    }
+
+    function showBatchReport(batch) {
+      const body = $("#modalBody");
+      let html = "<h2>导入结果：" + (batch.fileName || "数据迁移") + "</h2>";
+      html += "<p>状态：<b>" + (batch.status === "done" ? "完成" : batch.status === "error" ? "出错" : batch.status) +
+        "</b>。应用操作 " + batch.opsApplied + "/" + batch.opsTotal + "。</p>";
+      if (batch.skipped.length) {
+        html += "<h3>跳过（" + batch.skipped.length + "）</h3><ul class='report'>" +
+          batch.skipped.map(s => "<li>" + opLabel(s) + " · " + reasonText(s.reason) + "</li>").join("") + "</ul>";
+      }
+      if (batch.dropped.length) {
+        html += "<h3>删除压制的并发修改（" + batch.dropped.length + "）</h3><ul class='report'>" +
+          batch.dropped.map(d => "<li>" + opLabel(d) + " · " + reasonText(d.reason) + "</li>").join("") + "</ul>";
+      }
+      if (batch.conflicts.length) {
+        html += "<h3>挂起冲突（" + batch.conflicts.length + "）</h3><p class='muted'>两边离线时改了同一字段，已保留两份现场值，请点“冲突处理”裁决。</p>";
+      }
+      if (batch.status === "error") html += "<p class='muted'>错误：" + batch.error + "。可关闭后重新导入同一文件，已应用的操作不会重复。</p>";
+      if (!batch.skipped.length && !batch.dropped.length && !batch.conflicts.length && batch.status === "done") {
+        html += "<p class='muted'>全部操作干净合并，无冲突。</p>";
+      }
+      body.innerHTML = html;
+      openModal();
+    }
+
+    function openModal() { $("#modal").hidden = false; }
+    function closeModal() { $("#modal").hidden = true; }
+
+    // ---------- 渲染 ----------
+    function visibleMarks() {
+      const showDeleted = $("#showDeleted").checked;
+      return marks.filter(m => showDeleted || !m.deleted)
+        .filter(m => !filter.value || m.type === filter.value);
+    }
+
     function render() {
-      map.querySelectorAll(".marker").forEach(el => el.remove());
-      const filtered = filter.value ? marks.filter(m => m.type === filter.value) : marks;
-      filtered.forEach(mark => {
+      renderConflictBanner();
+      $("#deviceLine").textContent = "设备号：" + device.name + "（" + device.id + "）· 操作号 " + device.seq;
+      $("#map").querySelectorAll(".marker").forEach(el => el.remove());
+      const data = visibleMarks();
+      data.forEach(mark => {
         const el = document.createElement("button");
-        el.className = "marker " + mark.type + (mark.id === form.id.value ? " selected" : "");
+        el.className = "marker " + mark.type + (mark.id === form.id.value ? " selected" : "") + (mark.hasConflict ? " conflict" : "") + (mark.deleted ? " deleted" : "");
         el.style.left = mark.x + "%";
         el.style.top = mark.y + "%";
         el.textContent = mark.code.slice(0, 2);
+        el.title = mark.code + (mark.deleted ? "（已撤掉）" : "") + (mark.hasConflict ? "（冲突挂起）" : "");
         el.onclick = event => { event.stopPropagation(); edit(mark.id); };
-        map.appendChild(el);
+        $("#map").appendChild(el);
       });
-      if (view.value === "timeline") renderTimeline(filtered);
-      else renderList(filtered);
+      $("#diveList").innerHTML = dives.filter(d => !d.deleted).map(d => "<option value='" + d.code + "'>").join("");
+      if (view.value === "timeline") renderTimeline(data);
+      else renderList(data);
     }
+
     function renderList(data) {
-      listTitle.textContent = "标记列表";
-      list.className = "list";
-      list.innerHTML = data.map(m => '<div class="item '+(m.id===form.id.value?'active':'')+'" data-id="'+m.id+'"><b>'+m.code+'</b> <span class="pill">'+typeNames[m.type]+'</span><div class="muted">'+m.dive+' · '+m.depth+' · '+m.orientation+'</div><div>'+m.condition+'</div></div>').join("");
-      list.querySelectorAll("[data-id]").forEach(el => el.onclick = () => edit(el.dataset.id));
+      $("#listTitle").textContent = "标记列表";
+      $("#list").className = "list";
+      $("#list").innerHTML = data.map(m => {
+        const badges = (m.hasConflict ? '<span class="pill conflict">挂起</span>' : "") + (m.deleted ? '<span class="pill removed">已撤</span>' : "");
+        return '<div class="item ' + (m.id === form.id.value ? "active" : "") + (m.deleted ? " deleted" : "") + '" data-id="' + m.id + '">' +
+          "<b>" + m.code + "</b> " + badges +
+          '<div class="muted">' + typeNames[m.type] + " · " + diveCodeOf(m.diveId) + " · " + m.depth + " · " + m.orientation + "</div>" +
+          "<div>" + m.condition + "</div>" +
+          '<div class="muted">来源：' + deviceNameOf(m.deviceId) + "</div></div>";
+      }).join("");
+      $("#list").querySelectorAll("[data-id]").forEach(el => el.onclick = () => edit(el.dataset.id));
     }
+
     function renderTimeline(data) {
-      listTitle.textContent = "潜次时间线";
-      list.className = "timeline";
-      const groups = data.reduce((map, item) => ((map[item.dive] ||= []).push(item), map), {});
-      list.innerHTML = Object.entries(groups).map(([dive, items]) => '<div class="item"><b>'+dive+'</b><div class="muted">新增'+items.length+'个标记</div>'+items.map(i => '<div>'+i.code+' · '+typeNames[i.type]+'</div>').join("")+'</div>').join("");
+      $("#listTitle").textContent = "潜次时间线";
+      $("#list").className = "timeline";
+      const groups = data.reduce((map, item) => {
+        const code = diveCodeOf(item.diveId);
+        (map[code] ||= []).push(item);
+        return map;
+      }, {});
+      $("#list").innerHTML = Object.entries(groups).map(([dive, items]) =>
+        '<div class="item"><b>' + dive + '</b><div class="muted">新增' + items.length + '个标记</div>' +
+        items.map(i => "<div>" + i.code + " · " + typeNames[i.type] + (i.hasConflict ? ' <span class="pill conflict">挂起</span>' : "") + "</div>").join("") + "</div>"
+      ).join("");
     }
+
     function edit(id) {
       const mark = marks.find(m => m.id === id);
       if (!mark) return;
-      for (const [key, value] of Object.entries(mark)) if (form[key]) form[key].value = value;
+      if (mark.deleted) { alert("该标记已撤掉，不能编辑。"); return; }
+      for (const [key, value] of Object.entries(mark)) {
+        if (form[key]) form[key].value = value;
+      }
+      form.dive.value = diveCodeOf(mark.diveId);
       pending = { x: mark.x, y: mark.y };
       render();
     }
-    map.addEventListener("click", event => {
-      const rect = map.getBoundingClientRect();
+
+    // ---------- 事件 ----------
+    $("#map").addEventListener("click", event => {
+      const rect = $("#map").getBoundingClientRect();
       pending = { x: Number(((event.clientX - rect.left) / rect.width * 100).toFixed(2)), y: Number(((event.clientY - rect.top) / rect.height * 100).toFixed(2)) };
       form.reset();
       form.id.value = "";
-      form.code.value = "M-" + String(marks.length + 1).padStart(3, "0");
+      form.code.value = "M-" + String(marks.filter(m => !m.deleted).length + 1).padStart(3, "0");
       form.dive.value = "DIVE-01";
       render();
     });
+
     form.onsubmit = event => {
       event.preventDefault();
       if (!pending) pending = { x: 50, y: 50 };
       const data = Object.fromEntries(new FormData(form).entries());
-      if (data.id) Object.assign(marks.find(m => m.id === data.id), data, pending);
-      else marks.push({ ...data, id: crypto.randomUUID(), ...pending });
-      save(); render();
+      data.x = pending.x; data.y = pending.y;
+      if (data.id) updateMark(data.id, data);
+      else createMark(data);
+      form.reset();
+      form.id.value = "";
+      pending = null;
+      render();
     };
-    document.querySelector("#deleteBtn").onclick = () => {
+
+    $("#deleteBtn").onclick = () => {
       if (!form.id.value) return;
-      marks = marks.filter(m => m.id !== form.id.value);
-      form.reset(); pending = null; save(); render();
+      deleteMark(form.id.value);
+      form.reset();
+      form.id.value = "";
+      pending = null;
+      render();
     };
-    document.querySelector("#exportBtn").onclick = () => {
-      const blob = new Blob([JSON.stringify(marks, null, 2)], { type: "application/json" });
+
+    $("#exportBtn").onclick = () => {
+      const pkg = {
+        format: "zfl30-archive",
+        schemaVersion: SCHEMA_VERSION,
+        deviceId: device.id,
+        deviceName: device.name,
+        exportedAt: new Date().toISOString(),
+        dives, marks, ops
+      };
+      const blob = new Blob([JSON.stringify(pkg, null, 2)], { type: "application/json" });
       const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob); a.download = "dive-marks.json"; a.click(); URL.revokeObjectURL(a.href);
+      a.href = URL.createObjectURL(blob);
+      a.download = "dive-archive-" + device.id + ".json";
+      a.click();
+      URL.revokeObjectURL(a.href);
     };
-    filter.onchange = render; view.onchange = render;
+
+    $("#importBtn").onclick = () => $("#fileInput").click();
+    $("#fileInput").onchange = () => {
+      const file = $("#fileInput").files[0];
+      if (file) handleImportFile(file);
+      $("#fileInput").value = "";
+    };
+    $("#conflictBtn").onclick = openConflictModal;
+    $("#modalClose").onclick = closeModal;
+    $("#modal").addEventListener("click", e => { if (e.target === $("#modal")) closeModal(); });
+    $("#showDeleted").onchange = render;
+    filter.onchange = render;
+    view.onchange = render;
+
+    $("#deviceLine").style.cursor = "pointer";
+    $("#deviceLine").title = "点击修改设备名";
+    $("#deviceLine").onclick = () => {
+      const name = prompt("设备名（用于标记离线记录来源）：", device.name);
+      if (name && name.trim()) { device.name = name.trim(); persistDevice(); render(); }
+    };
+
+    // ---------- 启动 ----------
+    initDevice();
+    migrateIfNeeded();
+    dives = load(KEYS.dives, []);
+    marks = load(KEYS.marks, []);
+    ops = load(KEYS.ops, []);
+    batches = load(KEYS.batches, []);
+    conflicts = load(KEYS.conflicts, []);
+    seedIfEmpty();
+    for (let i = 0; i < 7; i++) {
+      const rib = document.createElement("div");
+      rib.className = "rib";
+      rib.style.left = 28 + i * 7 + "%";
+      $("#map").appendChild(rib);
+    }
+    checkRecovery();
     render();
   </script>
 </body>
